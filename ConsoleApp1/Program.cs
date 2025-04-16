@@ -1,198 +1,383 @@
 ﻿using System;
-using System.IO;
 
-class Program
-{
-    static void Main(string[] args)
+    public class Config
     {
-        //1
-        string currentDirectory = Directory.GetCurrentDirectory();
-        ListFilesAndDirectories(currentDirectory);
+        public int PageSize { get; set; } = 20;
+        public string DefaultDirectory { get; set; } = ".";
+        public bool ShowHiddenFiles { get; set; } = false;
+        public int HistorySize { get; set; } = 50;
+    }
 
-        //2
-        string sourceDirectory = "";
-        string targetDirectory = "";
-        CopyDirectory(sourceDirectory, targetDirectory);
+    class Program
+    {
+        private static Config _config;  //поля
+        private static string _currentDirectory;
+        private static List<string> _commandHistory = new List<string>();
+        private static int _historyIndex = 0;
 
-        //3
-        string filePath = "";
-        string directoryPath = "";
-        DeleteFile(filePath);
-        DeleteDirectory(directoryPath);
-
-        //4
-
-        string filePath = "";
-        string directoryPath = "";
-        GetFileInfo(filePath);
-        GetDirectoryInfo(directoryPath);
-
-        //5
-
-        string directoryPath = "";
-        int pageSize = 10; 
-        FileInfo[] files = new DirectoryInfo(directoryPath).GetFiles();
-        DirectoryInfo[] directories = new DirectoryInfo(directoryPath).GetDirectories();
-
-        var items = new object[files.Length + directories.Length];
-        Array.Copy(files, items, files.Length);
-        Array.Copy(directories, 0, items, files.Length, directories.Length);
-
-        int totalPages = (items.Length + pageSize - 1) / pageSize;
-
-        for (int page = 0; page < totalPages; page++)
+        static void Main(string[] args)
         {
-            Console.WriteLine($"Страница {page + 1} из {totalPages}");
-            for (int i = page * pageSize; i < Math.Min((page + 1) * pageSize, items.Length); i++)
+            LoadConfig();
+            _currentDirectory = _config.DefaultDirectory;
+            
+            Console.WriteLine("File Manager");
+            Console.WriteLine($"Current directory: {_currentDirectory}");
+            Console.WriteLine("Type 'help' for available commands");
+
+            LoadState();
+            MainLoop();
+            SaveState();
+        }
+
+        static void LoadConfig()
+        {
+            try
             {
-                if (items[i] is FileInfo file)
+                string configFile = "config.json";
+                if (File.Exists(configFile))
                 {
-                    Console.WriteLine($"{file.Name} (файл)");
+                    string json = File.ReadAllText(configFile);
+                    _config = JsonSerializer.Deserialize<Config>(json);
                 }
-                else if (items[i] is DirectoryInfo dir)
+                else
                 {
-                    Console.WriteLine($"{dir.Name} (каталог)");
+                    _config = new Config();
                 }
             }
-            Console.ReadKey();
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error loading config: {ex.Message}");
+                _config = new Config();
+            }
         }
 
-        //6
-        string directoryPath = "";
-        int pageSize = int.Parse(ConfigurationManager.AppSettings["ItemsPerPage"]);
-
-        FileInfo[] files = new DirectoryInfo(directoryPath).GetFiles();
-        DirectoryInfo[] directories = new DirectoryInfo(directoryPath).GetDirectories();
-
-        var items = new object[files.Length + directories.Length];
-        Array.Copy(files, items, files.Length);
-        Array.Copy(directories, 0, items, files.Length, directories.Length);
-
-        int totalPages = (items.Length + pageSize - 1) / pageSize;
-
-        for (int page = 0; page < totalPages; page++)
+        static void MainLoop()
         {
-            Console.WriteLine($"Страница {page + 1} из {totalPages}");
-            for (int i = page * pageSize; i < Math.Min((page + 1) * pageSize, items.Length); i++)
+            while (true)
             {
-                if (items[i] is FileInfo file)
+                Console.Write("> ");
+                string input = Console.ReadLine();
+
+                if (string.IsNullOrWhiteSpace(input))
+                    continue;
+
+                ProcessCommand(input);
+            }
+        }
+
+        static void ProcessCommand(string command)
+        {
+            try 
+            {
+                if (!string.IsNullOrWhiteSpace(command))
                 {
-                    Console.WriteLine($"{file.Name} (файл)");
+                    _commandHistory.Add(command);
+                    if (_commandHistory.Count > _config.HistorySize)
+                    {
+                        _commandHistory.RemoveAt(0);
+                    }
+                    _historyIndex = _commandHistory.Count;
                 }
-                else if (items[i] is DirectoryInfo dir)
+                
+                string[] parts = command.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 0) return;
+
+                switch (parts[0].ToLower())
                 {
-                    Console.WriteLine($"{dir.Name} (каталог)");
+                    case "ls":
+                        if (parts.Length > 1 && int.TryParse(parts[1], out int page))
+                        {
+                            ListDirectory(page);
+                        }
+                        else
+                        {
+                            ListDirectory();
+                        }
+                        break;
+                {
+                    case "ls":
+                        ListDirectory();
+                        break;
+                    case "cd":
+                        ChangeDirectory(parts.Length > 1 ? parts[1] : "");
+                        break;
+                    case "exit":
+                        Environment.Exit(0);
+                        break;
+                    case "help":
+                        ShowHelp();
+                        break;
+                    case "cp":
+                        CopyFileOrDirectory(parts);
+                        break;
+                    case "rm":
+                        DeleteFileOrDirectory(parts);
+                        break;
+                    case "info":
+                        ShowFileInfo(parts);
+                        break;
+                    default:
+                        Console.WriteLine($"Unknown command: {parts[0]}");
+                        break;
+                }}
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error: {ex.Message}");
+            }
+        }
+
+        static void ListDirectory(int page = 1)
+        {
+            try
+            {
+                var files = Directory.GetFiles(_currentDirectory);
+                var dirs = Directory.GetDirectories(_currentDirectory);
+                int totalItems = files.Length + dirs.Length;
+                int totalPages = (int)Math.Ceiling(totalItems / (double)_config.PageSize);
+
+                Console.WriteLine($"\nDirectory listing (Page {page} of {totalPages}):");
+                Console.WriteLine("Directories:");
+                
+                // директории
+                int startIndex = (page - 1) * _config.PageSize;
+                int endIndex = Math.Min(startIndex + _config.PageSize, dirs.Length);
+                
+                for (int i = startIndex; i < endIndex; i++)
+                {
+                    Console.WriteLine($"  {Path.GetFileName(dirs[i])}");
+                }
+
+                // файлы
+                Console.WriteLine("\nFiles:");
+                startIndex = Math.Max(0, (page - 1) * _config.PageSize - dirs.Length);
+                endIndex = Math.Min(startIndex + _config.PageSize, files.Length);
+                
+                for (int i = startIndex; i < endIndex; i++)
+                {
+                    var info = new FileInfo(files[i]);
+                    Console.WriteLine($"  {Path.GetFileName(files[i])} ({info.Length} bytes)");
+                }
+
+                Console.WriteLine($"\nUse 'ls [page]' to view other pages (1-{totalPages})");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error listing directory: {ex.Message}");
+                LogError(ex);
+            }
+        }
+
+        static void ChangeDirectory(string path)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(path))
+                {
+                    Console.WriteLine("Current directory: " + _currentDirectory);
+                    return;
+                }
+
+                string newPath = Path.Combine(_currentDirectory, path);
+                if (Directory.Exists(newPath))
+                {
+                    _currentDirectory = Path.GetFullPath(newPath);
+                    Console.WriteLine($"Changed to directory: {_currentDirectory}");
+                }
+                else
+                {
+                    Console.WriteLine($"Directory not found: {newPath}");
                 }
             }
-            Console.ReadKey();
-        }
-    }
-
-    //1
-    static void ListFilesAndDirectories(string directoryPath)
-    {
-        try
-        {
-            string[] directories = Directory.GetDirectories(directoryPath);
-            foreach (string direct in directories)
+            catch (Exception ex)
             {
-                Console.WriteLine($"Directory: {direct}");
-            }
-
-            string[] files = Directory.GetFiles(directoryPath);
-            foreach (string file in files)
-            {
-                Console.WriteLine($"File: {file}");
+                Console.WriteLine($"Error changing directory: {ex.Message}");
             }
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error: {ex.Message}");
-        }
-    }
 
-    //2
-
-      static void CopyDirectory(string sourceDir, string targetDir)
-    {
-        if (!Directory.Exists(targetDir))
+        static void ShowHelp()  //доступные команды
         {
-            Directory.CreateDirectory(targetDir);
-        }
-
-        foreach (string file in Directory.GetFiles(sourceDir))
-        {
-            string targetFile = Path.Combine(targetDir, Path.GetFileName(file));
-            File.Copy(file, targetFile);
+            Console.WriteLine("\nДоступные команды:");
+            Console.WriteLine("ls [page] - Список содержимого каталога (с разбивкой по страницам)");
+            Console.WriteLine("cd [path] - Изменить каталог");
+            Console.WriteLine("cp [source] [dest] - Скопировать файл/каталог");
+            Console.WriteLine("rm [path] - удалить файл/каталог");
+            Console.WriteLine("info [path] - Показывать информацию о файле/каталоге");
+            Console.WriteLine("exit - Выйдите из программы");
+            Console.WriteLine("help - Покажите эту справку");
+            Console.WriteLine("\nИспользуйте клавиши со стрелками ↑/↓ для навигации по истории команд");
+            Console.WriteLine($"Текущий размер страницы: {_config.PageSize} предметы\n");
         }
 
-        foreach (string dir in Directory.GetDirectories(sourceDir))
+        static void LogError(Exception ex)  //функция которая будет обрабатывать ошибки
         {
-            string targetSubDir = Path.Combine(targetDir, Path.GetFileName(dir));
-            CopyDirectory(dir, targetSubDir);
-        }
-    }
-
-    //3
-    static void DeleteFile(string path)
-    {
-        if (File.Exists(path))
-        {
-            File.Delete(path);
-            Console.WriteLine($"Файл {path} успешно удалён.");
-        }
-        else
-        {
-            Console.WriteLine($"Файл {path} не найден.");
-        }
-    }
-
-    static void DeleteDirectory(string path)
-    {
-        if (Directory.Exists(path))
-        {
-            Directory.Delete(path, true);
-            Console.WriteLine($"Каталог {path} успешно удалён.");
-        }
-        else
-        {
-            Console.WriteLine($"Каталог {path} не найден.");
-        }
-    }
-
-    //4
-    static void GetFileInfo(string path)
-    {
-        if (File.Exists(path))
-        {
-            FileInfo fileInfo = new FileInfo(path);
-            Console.WriteLine($"Имя файла: {fileInfo.Name}");
-            Console.WriteLine($"Размер файла: {fileInfo.Length} байт");
-            Console.WriteLine($"Атрибуты файла: {fileInfo.Attributes}");
-        }
-        else
-        {
-            Console.WriteLine($"Файл {path} не найден.");
-        }
-    }
-
-    static void GetDirectoryInfo(string path)
-    {
-        if (Directory.Exists(path))
-        {
-            DirectoryInfo directoryInfo = new DirectoryInfo(path);
-            Console.WriteLine($"Имя каталога: {directoryInfo.Name}");
-            Console.WriteLine($"Атрибуты каталога: {directoryInfo.Attributes}");
-            long directorySize = 0;
-            foreach (FileInfo file in directoryInfo.GetFiles())
+            try
             {
-                directorySize += file.Length;
+                string errorsDir = Path.Combine(_currentDirectory, "errors");
+                if (!Directory.Exists(errorsDir))
+                {
+                    Directory.CreateDirectory(errorsDir);
+                }
+
+                string errorFile = Path.Combine(errorsDir, $"error_{DateTime.Now:yyyyMMdd_HHmmss}.txt");
+                File.WriteAllText(errorFile, $"{DateTime.Now}\n{ex}\n\nStack Trace:\n{ex.StackTrace}");
             }
-            Console.WriteLine($"Размер каталога: {directorySize} байт");
+            catch
+            {
+                
+            }
         }
-        else
+
+        static void SaveState()
         {
-            Console.WriteLine($"Каталог {path} не найден.");
+            try
+            {
+                var state = new
+                {
+                    CurrentDirectory = _currentDirectory,
+                    CommandHistory = _commandHistory
+                };
+                string json = JsonSerializer.Serialize(state);
+                File.WriteAllText("state.json", json);
+            }
+            catch
+            {
+                
+            }
+        }
+
+        static void LoadState()
+        {
+            try
+            {
+                if (File.Exists("state.json"))
+                {
+                    string json = File.ReadAllText("state.json");
+                    var state = JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+                    _currentDirectory = state["CurrentDirectory"].ToString();
+                    
+                    var history = JsonSerializer.Deserialize<List<string>>(state["CommandHistory"].ToString());
+                    _commandHistory = history;
+                }
+            }
+            catch
+            {
+               
+            }
+        }
+
+        static void CopyFileOrDirectory(string[] parts)
+        {
+            if (parts.Length < 3)
+            {
+                Console.WriteLine("Usage: cp [source] [destination]");
+                return;
+            }
+
+            try
+            {
+                string source = Path.Combine(_currentDirectory, parts[1]);
+                string dest = Path.Combine(_currentDirectory, parts[2]);
+
+                if (Directory.Exists(source))
+                {
+                    Directory.CreateDirectory(dest);
+                    foreach (string dirPath in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
+                    {
+                        Directory.CreateDirectory(dirPath.Replace(source, dest));
+                    }
+                    foreach (string filePath in Directory.GetFiles(source, "*.*", SearchOption.AllDirectories))
+                    {
+                        File.Copy(filePath, filePath.Replace(source, dest), true);
+                    }
+                    Console.WriteLine($"Copied directory: {parts[1]} -> {parts[2]}");
+                }
+                else if (File.Exists(source))
+                {
+                    File.Copy(source, dest, true);
+                    Console.WriteLine($"Copied file: {parts[1]} -> {parts[2]}");
+                }
+                else
+                {
+                    Console.WriteLine($"Source not found: {parts[1]}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error copying: {ex.Message}");
+            }
+        }
+
+        static void DeleteFileOrDirectory(string[] parts)
+        {
+            if (parts.Length < 2)
+            {
+                Console.WriteLine("Usage: rm [path]");
+                return;
+            }
+
+            try
+            {
+                string path = Path.Combine(_currentDirectory, parts[1]);
+                
+                if (Directory.Exists(path))
+                {
+                    Directory.Delete(path, true);
+                    Console.WriteLine($"Deleted directory: {parts[1]}");
+                }
+                else if (File.Exists(path))
+                {
+                    File.Delete(path);
+                    Console.WriteLine($"Deleted file: {parts[1]}");
+                }
+                else
+                {
+                    Console.WriteLine($"Path not found: {parts[1]}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error deleting: {ex.Message}");
+            }
+        }
+
+        static void ShowFileInfo(string[] parts)
+        {
+            if (parts.Length < 2)
+            {
+                Console.WriteLine("Usage: info [path]");
+                return;
+            }
+
+            try
+            {
+                string path = Path.Combine(_currentDirectory, parts[1]);
+                
+                if (Directory.Exists(path))
+                {
+                    var dirInfo = new DirectoryInfo(path);
+                    Console.WriteLine($"Directory: {path}");
+                    Console.WriteLine($"Created: {dirInfo.CreationTime}");
+                    Console.WriteLine($"Last modified: {dirInfo.LastWriteTime}");
+                    Console.WriteLine($"Attributes: {dirInfo.Attributes}");
+                }
+                else if (File.Exists(path))
+                {
+                    var fileInfo = new FileInfo(path);
+                    Console.WriteLine($"File: {path}");
+                    Console.WriteLine($"Size: {fileInfo.Length} bytes");
+                    Console.WriteLine($"Created: {fileInfo.CreationTime}");
+                    Console.WriteLine($"Last modified: {fileInfo.LastWriteTime}");
+                    Console.WriteLine($"Attributes: {fileInfo.Attributes}");
+                }
+                else
+                {
+                    Console.WriteLine($"Path not found: {parts[1]}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error getting info: {ex.Message}");
+            }
         }
     }
-}
+
